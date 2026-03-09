@@ -1,0 +1,10 @@
+# AISmartMirror - Face detection pipeline
+# Camera, detection, display
+
+opencv-python>=4.8.0
+numpy>=1.24.0
+mediapipe==0.10.13
+python-dotenv>=1.0.0
+
+# Development
+pytest>=7.4.0

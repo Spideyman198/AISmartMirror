@@ -1,0 +1,1 @@
+"""AISmartMirror application package."""
