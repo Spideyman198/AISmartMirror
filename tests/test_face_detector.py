@@ -17,10 +17,10 @@ class TestFaceDetectorInterface:
     def test_init_default_confidence(self) -> None:
         """Constructor uses default min_confidence."""
         detector = FaceDetector()
-        assert detector._min_confidence == 0.5
+        assert detector._min_confidence == 0.4
 
     def test_init_custom_confidence(self) -> None:
-        """Constructor accepts custom min_confidence."""
+        """Constructor accepts custom min_confidence and model_selection."""
         detector = FaceDetector(min_confidence=0.8)
         assert detector._min_confidence == 0.8
 

@@ -52,18 +52,7 @@ class AppController:
         logger.info("Initializing %s", self._settings.APP_NAME)
 
         try:
-            # Init face detector first (loads MediaPipe/TensorFlow) so camera opens last with fresh buffer
-            if face_detector is not None:
-                self._face_detector = face_detector
-            else:
-                from vision.face_detector import FaceDetector
-
-                self._face_detector = FaceDetector(
-                    min_confidence=self._settings.FACE_DETECTION_CONFIDENCE,
-                )
-            self._face_recognizer = None  # Placeholder for now
-            self._gesture_recognizer = None  # Placeholder for now
-
+            # Open camera first (matches test_camera.py flow), then load face detector
             if camera_manager is not None:
                 self._camera_manager = camera_manager
             else:
@@ -116,6 +105,19 @@ class AppController:
                     self._camera_manager.get_backend_name(),
                 )
 
+            # Init face detector after camera (MediaPipe loads last)
+            if face_detector is not None:
+                self._face_detector = face_detector
+            else:
+                from vision.face_detector import FaceDetector
+
+                self._face_detector = FaceDetector(
+                    min_confidence=self._settings.FACE_DETECTION_CONFIDENCE,
+                    model_selection=self._settings.FACE_DETECTION_MODEL,
+                )
+            self._face_recognizer = None  # Placeholder for now
+            self._gesture_recognizer = None  # Placeholder for now
+
             logger.info("Initialization complete")
             return True
 
@@ -145,9 +147,6 @@ class AppController:
 
             cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
 
-            # Flush buffer: grab without decode to discard stale frames
-            self._camera_manager.flush_buffer(30)
-
             frame_count = 0
             debug_saved = False
 
@@ -173,7 +172,7 @@ class AppController:
                 consecutive_failures = 0  # Reset on success
                 frame_count += 1
 
-                # Debug: log first frame, optionally save
+                # Debug: log first frame, always save one for verification
                 if frame_count == 1:
                     mean_val = float(frame.mean())
                     logger.info(
@@ -182,10 +181,10 @@ class AppController:
                         frame.dtype,
                         mean_val,
                     )
-                    if self._settings.DEBUG_SAVE_FRAME and not debug_saved:
+                    if not debug_saved:
                         path = "debug_frame.jpg"
                         cv2.imwrite(path, frame)
-                        logger.info("Debug frame saved to %s", path)
+                        logger.info("Debug frame saved to %s (verify it is not black)", path)
                         debug_saved = True
 
                 # Detect faces (MediaPipe uses RGB copy internally; frame stays BGR)

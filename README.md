@@ -166,6 +166,13 @@ python scripts/health_check.py --skip-camera
 3. Point the camera at a face — green boxes appear around detected faces
 4. Press **q** to quit
 
+### Face detection tuning
+
+Distant or small faces may be harder to detect with lightweight real-time models. Tune via `.env`:
+
+- `FACE_DETECTION_CONFIDENCE` (default 0.4): Lower = more sensitive, more false positives
+- `FACE_DETECTION_MODEL`: 0 = short-range (2m), 1 = full-range (5m, better for distant faces)
+
 ## Raspberry Pi Deployment
 
 For deployment on Raspberry Pi 5:

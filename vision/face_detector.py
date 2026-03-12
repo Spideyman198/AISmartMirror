@@ -30,20 +30,29 @@ class FaceDetector:
         - confidence: float 0.0-1.0
     """
 
-    def __init__(self, min_confidence: float = 0.5) -> None:
+    def __init__(
+        self,
+        min_confidence: float = 0.4,
+        model_selection: int = 1,
+    ) -> None:
         """
         Initialize the face detector.
 
         Args:
-            min_confidence: Minimum detection confidence threshold (0.0-1.0).
+            min_confidence: Minimum detection confidence (0.0-1.0). Lower = more sensitive.
+            model_selection: 0=short-range (2m), 1=full-range (5m). Use 1 for distant faces.
         """
         self._min_confidence = min_confidence
         self._mp_face_detection = mp.solutions.face_detection
         self._face_detection = self._mp_face_detection.FaceDetection(
             min_detection_confidence=min_confidence,
-            model_selection=0,  # 0=short-range (2m), 1=full-range (5m)
+            model_selection=model_selection,
         )
-        logger.info("Face detector initialized (min_confidence=%.2f)", min_confidence)
+        logger.info(
+            "Face detector initialized (confidence=%.2f, model=%d)",
+            min_confidence,
+            model_selection,
+        )
 
     def detect(self, frame: np.ndarray) -> List[FaceDetection]:
         """

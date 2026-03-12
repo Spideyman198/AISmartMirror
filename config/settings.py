@@ -37,8 +37,10 @@ class Settings:
 
         # Vision
         self.FACE_DETECTION_CONFIDENCE: float = float(
-            os.getenv("FACE_DETECTION_CONFIDENCE", "0.5")
+            os.getenv("FACE_DETECTION_CONFIDENCE", "0.4")
         )
+        # MediaPipe model: 0=short-range (2m), 1=full-range (5m) - use 1 for distant faces
+        self.FACE_DETECTION_MODEL: int = int(os.getenv("FACE_DETECTION_MODEL", "1"))
         self.KNOWN_FACES_DIR: Optional[str] = os.getenv("KNOWN_FACES_DIR")
 
         # Cloud APIs (optional - app runs without these)
