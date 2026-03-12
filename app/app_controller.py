@@ -115,7 +115,23 @@ class AppController:
                     min_confidence=self._settings.FACE_DETECTION_CONFIDENCE,
                     model_selection=self._settings.FACE_DETECTION_MODEL,
                 )
-            self._face_recognizer = None  # Placeholder for now
+            # Init face recognizer (loads local embeddings)
+            profiles_dir = self._settings.KNOWN_FACES_DIR
+            if profiles_dir:
+                from vision.face_recognizer import FaceRecognizer
+                from pathlib import Path
+
+                self._face_recognizer = FaceRecognizer(
+                    profiles_dir=Path(profiles_dir),
+                    threshold=self._settings.FACE_RECOGNITION_THRESHOLD,
+                )
+            else:
+                from vision.face_recognizer import FaceRecognizer
+
+                self._face_recognizer = FaceRecognizer(
+                    threshold=self._settings.FACE_RECOGNITION_THRESHOLD,
+                )
+
             self._gesture_recognizer = None  # Placeholder for now
 
             logger.info("Initialization complete")
@@ -144,11 +160,19 @@ class AppController:
 
         try:
             from vision.display import draw_face_boxes
+            from vision.recognition_smoother import RecognitionSmoother
 
             cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
 
             frame_count = 0
             debug_saved = False
+            last_labels: list[str] = []
+            last_debug_infos: list[dict] | None = None
+            recognition_interval = max(1, self._settings.FACE_RECOGNITION_INTERVAL_FRAMES)
+            smoother = RecognitionSmoother(
+                confirmation_count=max(1, self._settings.RECOGNITION_CONFIRMATION_COUNT),
+            )
+            show_debug = self._settings.DEBUG_RECOGNITION
 
             while self._running:
                 frame = self._camera_manager.read()
@@ -187,12 +211,43 @@ class AppController:
                         logger.info("Debug frame saved to %s (verify it is not black)", path)
                         debug_saved = True
 
-                # Detect faces (MediaPipe uses RGB copy internally; frame stays BGR)
+                # Detect faces every frame (fast, MediaPipe)
                 detections = self._face_detector.detect(frame)
 
-                # Display: draw boxes on a copy so we never modify the raw frame
+                # Run recognition every N frames or when face count changes
+                run_recognition = (
+                    self._face_recognizer
+                    and (
+                        frame_count % recognition_interval == 0
+                        or len(detections) != len(last_labels)
+                    )
+                )
+                if run_recognition:
+                    results = []
+                    for det in detections:
+                        x, y, w, h = det["bbox"]
+                        crop = frame[y : y + h, x : x + w]
+                        result = self._face_recognizer.recognize(crop)
+                        results.append(result)
+                    labels, debug_infos = smoother.update(
+                        results,
+                        threshold=self._settings.FACE_RECOGNITION_THRESHOLD,
+                        show_debug=show_debug,
+                    )
+                    last_labels = labels
+                    last_debug_infos = debug_infos if show_debug else None
+                else:
+                    labels = last_labels if len(detections) == len(last_labels) else []
+                    debug_infos = last_debug_infos if labels else None
+
+                # Display: draw boxes, labels, and optional debug info
                 display_frame = frame.copy()
-                draw_face_boxes(display_frame, detections)
+                draw_face_boxes(
+                    display_frame,
+                    detections,
+                    labels=labels if labels else None,
+                    debug_infos=debug_infos if show_debug else None,
+                )
                 cv2.imshow(WINDOW_NAME, display_frame)
 
                 # Check for quit: 'q' key or window closed
@@ -225,5 +280,9 @@ class AppController:
         if self._face_detector:
             self._face_detector.close()
             self._face_detector = None
+
+        if self._face_recognizer:
+            self._face_recognizer.close()
+            self._face_recognizer = None
 
         logger.info("Shutdown complete")

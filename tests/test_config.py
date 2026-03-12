@@ -24,6 +24,7 @@ def test_settings_defaults() -> None:
         assert settings.CAMERA_WIDTH == 640
         assert settings.CAMERA_HEIGHT == 480
         assert settings.FACE_DETECTION_CONFIDENCE == 0.5
+        assert settings.FACE_RECOGNITION_INTERVAL_FRAMES == 5
     get_settings.cache_clear()
 
 

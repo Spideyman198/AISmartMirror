@@ -48,6 +48,7 @@ def check_imports() -> bool:
         ("cv2", "opencv-python"),
         ("numpy", "numpy"),
         ("mediapipe", "mediapipe"),
+        ("face_recognition", "face-recognition"),
         ("dotenv", "python-dotenv"),
     ]
     for module, pkg in packages:

@@ -42,6 +42,23 @@ class Settings:
         # MediaPipe model: 0=short-range (2m), 1=full-range (5m) - use 1 for distant faces
         self.FACE_DETECTION_MODEL: int = int(os.getenv("FACE_DETECTION_MODEL", "1"))
         self.KNOWN_FACES_DIR: Optional[str] = os.getenv("KNOWN_FACES_DIR")
+        # Recognition: max distance for match. Lower=stricter (fewer false matches),
+        # higher=lenient (better at angles, more false matches). Tune in .env.
+        self.FACE_RECOGNITION_THRESHOLD: float = float(
+            os.getenv("FACE_RECOGNITION_THRESHOLD", "0.6")
+        )
+        # Run recognition every N frames (1=every frame). Higher reduces lag.
+        self.FACE_RECOGNITION_INTERVAL_FRAMES: int = int(
+            os.getenv("FACE_RECOGNITION_INTERVAL_FRAMES", "5")
+        )
+        # Require N consecutive matching results before confirming identity (reduces flicker)
+        self.RECOGNITION_CONFIRMATION_COUNT: int = int(
+            os.getenv("RECOGNITION_CONFIRMATION_COUNT", "2")
+        )
+        # Show recognition debug info on screen (distance, threshold, state)
+        self.DEBUG_RECOGNITION: bool = os.getenv("DEBUG_RECOGNITION", "false").lower() in (
+            "true", "1", "yes"
+        )
 
         # Cloud APIs (optional - app runs without these)
         self.OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
