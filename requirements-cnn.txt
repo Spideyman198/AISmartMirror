@@ -1,0 +1,6 @@
+# CNN face recognition module - install in addition to requirements.txt
+# pip install -r requirements.txt -r requirements-cnn.txt
+
+torch>=2.0.0
+torchvision>=0.15.0
+Pillow>=9.0.0

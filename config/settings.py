@@ -60,6 +60,59 @@ class Settings:
             "true", "1", "yes"
         )
 
+        # CNN face recognizer (optional - separate from embedding-based baseline)
+        self.CNN_MODEL_DIR: Optional[str] = os.getenv("CNN_MODEL_DIR")
+        self.CNN_CONFIDENCE_THRESHOLD: float = float(
+            os.getenv("CNN_CONFIDENCE_THRESHOLD", "0.62")
+        )
+        _cnn_m = os.getenv("CNN_MIN_CLASS_MARGIN", "0.15")
+        self.CNN_MIN_CLASS_MARGIN: float = float(_cnn_m) if _cnn_m else 0.0
+        _cnn_e = os.getenv("CNN_MAX_SOFTMAX_ENTROPY", "").strip()
+        self.CNN_MAX_SOFTMAX_ENTROPY: Optional[float] = (
+            float(_cnn_e) if _cnn_e else None
+        )
+        self.USE_CNN_RECOGNIZER: bool = os.getenv("USE_CNN_RECOGNIZER", "false").lower() in (
+            "true", "1", "yes"
+        )
+        # Guided enrollment (camera auto-scan)
+        self.ENROLLMENT_TOTAL_SAMPLES: int = int(
+            os.getenv("ENROLLMENT_TOTAL_SAMPLES", "24")
+        )
+        self.ENROLLMENT_MIN_FACE_SIZE: int = int(
+            os.getenv("ENROLLMENT_MIN_FACE_SIZE", "72")
+        )
+        self.ENROLLMENT_MIN_LAPLACIAN_VAR: float = float(
+            os.getenv("ENROLLMENT_MIN_LAPLACIAN_VAR", "45")
+        )
+        self.ENROLL_CAPTURE_INTERVAL_FRAMES: int = int(
+            os.getenv("ENROLL_CAPTURE_INTERVAL_FRAMES", "2")
+        )
+        self.ENROLL_CAPTURE_COOLDOWN_SECONDS: float = float(
+            os.getenv(
+                "ENROLL_CAPTURE_COOLDOWN_SECONDS",
+                os.getenv("ENROLLMENT_CAPTURE_COOLDOWN_SEC", "0.55"),
+            )
+        )
+        # Backward-compatible alias used by older code paths.
+        self.ENROLLMENT_CAPTURE_COOLDOWN_SEC: float = float(
+            os.getenv("ENROLLMENT_CAPTURE_COOLDOWN_SEC", str(self.ENROLL_CAPTURE_COOLDOWN_SECONDS))
+        )
+        self.ENROLLMENT_DUPLICATE_DISTANCE: float = float(
+            os.getenv("ENROLLMENT_DUPLICATE_DISTANCE", "0.03")
+        )
+        self.ENROLLMENT_ENABLE_DISTANCE_SWEEP: bool = os.getenv(
+            "ENROLLMENT_ENABLE_DISTANCE_SWEEP", "true"
+        ).lower() in ("true", "1", "yes")
+        self.ENROLLMENT_STEADY_FRAMES_REQUIRED: int = int(
+            os.getenv("ENROLLMENT_STEADY_FRAMES_REQUIRED", "3")
+        )
+        self.ENROLL_REQUIRE_POSE_MATCH: bool = os.getenv(
+            "ENROLL_REQUIRE_POSE_MATCH", "false"
+        ).lower() in ("true", "1", "yes")
+        self.ENROLL_POSE_TIMEOUT_SEC: float = float(
+            os.getenv("ENROLL_POSE_TIMEOUT_SEC", "12")
+        )
+
         # Cloud APIs (optional - app runs without these)
         self.OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.ELEVENLABS_API_KEY: Optional[str] = os.getenv("ELEVENLABS_API_KEY")

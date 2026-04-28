@@ -1,13 +1,9 @@
 # AISmartMirror - Face detection + recognition pipeline
-# Camera, detection, recognition (local)
-
-# Windows: install dlib-bin first (pre-built wheel), then face_recognition --no-deps
-dlib-bin
-opencv-python>=4.8.0
-numpy>=1.24.0
-mediapipe==0.10.13
-face-recognition>=1.3.0
-python-dotenv>=1.0.0
-
-# Development
-pytest>=7.4.0
+#
+# Windows: Run scripts/install_deps.ps1 to install (avoids dlib build/CMake).
+# Or manually:
+#   pip install dlib-bin
+#   pip install face-recognition --no-deps
+#   pip install -r requirements-base.txt
+#
+# CNN pipeline: pip install -r requirements-cnn.txt

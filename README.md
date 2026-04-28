@@ -112,6 +112,13 @@ From project root with venv activated:
 python -m app.main
 ```
 
+Startup menu options include:
+- Start Smart Mirror
+- Enroll New User
+- Test Face Recognition
+- Confirm New Users / Retrain CNN
+- Exit
+
 Or:
 
 ```bash
@@ -128,7 +135,7 @@ If the camera fails to open, the app exits with an error message. Ensure no othe
    ```bash
    python scripts/enroll_user.py --name Alice
    ```
-   Guided auto-enrollment: follow the on-screen prompts (Look straight, Turn left, etc.). Samples capture automatically when your pose matches and quality is good. Duplicates and blurry/small crops are rejected. Profiles saved to `data/known_faces/`. Use `--samples 15` to capture fewer.
+   Guided auto-enrollment: follow the on-screen prompts (Look straight, Turn left, etc.). By default, capture is **prompt-based** and triggers when quality is good (face present, large enough, sharp enough, cooldown, non-duplicate). Pose detection is shown as feedback and is not required unless you enable strict mode. Profiles saved to `data/known_faces/`. Use `--samples 15` to capture fewer.
 
 2. **Run live recognition**:
    ```bash
@@ -199,10 +206,29 @@ python scripts/health_check.py --skip-camera
 The enrollment script uses a **guided auto-scanner** instead of manual capture:
 
 1. **On-screen guidance** cycles through poses: Look straight, Turn left, Turn right, Look up, Look down.
-2. **Automatic capture** when your pose matches the current target, the face crop is large enough and sharp, and a cooldown has passed.
-3. **Duplicate rejection** skips samples too similar to already-collected embeddings.
-4. **Pose diversity** is ensured by filling buckets (center, left, right, up, down) evenly before allowing more of any pose.
-5. **Progress** shows e.g. `12/20  center:3 left:2 right:2 up:2 down:3`.
+2. **Automatic capture (default)** is prompt-based: for each target prompt, samples are captured when quality checks pass (face detected, minimum size, blur gate, cooldown, duplicate rejection).
+3. **Pose detection feedback** is shown on screen (`Pose detected: center/left/right/up/down`) but does not block capture in default mode.
+4. **Strict pose mode (optional)** can be enabled with `ENROLL_REQUIRE_POSE_MATCH=true` if you want target-pose matching to be required.
+5. **Anti-stuck safeguards**: each pose has a timeout (`ENROLL_POSE_TIMEOUT_SEC`), and you can press `N` to skip to the next pose.
+6. **Progress** shows overall samples and per-pose counts.
+
+Why this default: strict 2D pose heuristics can be fragile in real webcam conditions (lighting, motion blur, occlusion), so strict matching may stall enrollment even when the user follows prompts.
+
+### Hybrid recognition workflow (recommended)
+
+AISmartMirror now uses a **hybrid runtime**:
+
+- **Primary**: CNN recognizer (fast, stable, class-based)
+- **Fallback**: embedding recognizer for CNN-Unknown faces
+
+This gives the best of both:
+- CNN remains the main recognizer during normal operation.
+- Newly enrolled users can be recognized immediately (via embedding fallback) before CNN retraining.
+
+When enrollment adds a user, the system marks `data/cnn_models/model_status.json` as:
+- `cnn_outdated=true`
+
+That flag is a reminder that CNN should be retrained on the latest dataset.
 
 ### Why multiple embeddings help
 
@@ -241,6 +267,131 @@ Distant or small faces may be harder to detect with lightweight real-time models
 
 - `FACE_DETECTION_CONFIDENCE` (default 0.4): Lower = more sensitive, more false positives
 - `FACE_DETECTION_MODEL`: 0 = short-range (2m), 1 = full-range (5m, better for distant faces)
+
+### CNN face recognizer (optional)
+
+A second recognition module using a lightweight **MobileNetV2** classifier. Trained on your face crops; outputs class labels directly. Does not replace the baseline embedding-based recognizer.
+
+**Install CNN dependencies:**
+```bash
+pip install -r requirements-cnn.txt
+```
+
+**1. Collect face data** (run per user):
+```bash
+python scripts/collect_cnn_faces.py --name alice --target 100
+python scripts/collect_cnn_faces.py --name bob --target 100
+```
+
+**2. Prepare train/val split:**
+```bash
+python scripts/prepare_cnn_dataset.py
+```
+
+**3. Train:**
+```bash
+python scripts/train_cnn_recognizer.py --epochs 15
+```
+
+**4. Evaluate:**
+```bash
+python scripts/evaluate_cnn_recognizer.py
+```
+
+**5. Live test (webcam):**
+```bash
+python scripts/test_cnn_live.py
+```
+
+**6. Use in app:** Set `CNN_MODEL_DIR=data/cnn_models` in `.env` (or keep default path). The app uses CNN as primary when a trained model exists, with embedding fallback for immediate recognition of newly enrolled users.
+
+### Retraining cadence and trigger
+
+Use periodic retraining (e.g., after batching several new enrollments), not after every single user.
+
+Best workflow from the app menu:
+- Choose **Confirm New Users / Retrain CNN**
+- The app scans `data/cnn_faces/<user_id>/` and compares to `data/cnn_models/class_mapping.json`
+- It reports:
+  - users currently in the CNN model
+  - new users not yet in the model
+  - existing users with increased image counts
+- It asks confirmation before retraining
+- It backs up the current model/mapping to `data/cnn_models/backups/<timestamp>/`
+- Then runs:
+  1. `prepare_cnn_dataset.py --clean`
+  2. `check_benchmark_leakage.py` (if available)
+  3. `train_cnn_recognizer.py` in quick-update mode:
+     - 5 epochs
+     - lower learning rate (`3e-4`)
+     - warm-start from existing `cnn_face_model.pt` when available
+  4. `evaluate_cnn_recognizer.py` (if available)
+- If any step fails, previous model files are restored/kept from backup.
+
+You can also run it directly:
+
+```bash
+python scripts/confirm_new_users.py
+```
+
+Legacy command still supported:
+
+```bash
+python scripts/retrain_cnn_model.py
+```
+
+Both flows retrain on the full dataset and mark CNN status fresh (`cnn_outdated=false`) after success.
+
+### Avoiding catastrophic forgetting
+
+Retraining uses the full accumulated dataset under `data/cnn_faces/` (all users), then rebuilds train/val from all classes.  
+Because all previously enrolled users remain in training data, old identities are retained instead of being overwritten by only new-user data.
+
+#### CNN live pipeline: smoothing and stability
+
+- **`vision/cnn_live_pipeline.py`** wraps the CNN with:
+  - **Throttled inference:** runs the network every **N** frames (`inference_interval`, default 2). Between runs, the **last stable labels** are reused so the UI stays responsive and CPU use drops.
+  - **Confirmation (anti-flicker):** `RecognitionSmoother` requires the **same raw label** (name or Unknown) on **consecutive CNN outputs** before the **displayed** identity updates. So a single noisy frame does not flip the name. Switching to a **new** identity also requires **several consecutive** agreeing frames—this trades a little latency for stability.
+- **Raw label** comes from `CNNFaceRecognizer`: known if softmax confidence and optional **class margin** pass; otherwise Unknown.
+
+#### CNN unknown handling and confidence
+
+Two layers reject weak predictions:
+
+1. **Confidence threshold** (`confidence_threshold` on `CNNFaceRecognizer`, CLI `--threshold`): the softmax score of the predicted class must be **≥ this value** or the result is **Unknown**. **Higher** → fewer false IDs (more Unknown). **Lower** → more known hits (more risk of wrong person).
+2. **Class margin** (`min_class_margin`, CLI `--margin`): optional **top1 − top2** softmax gap. If the top two classes are both plausible (small gap), the result is **Unknown** even when confidence is high—helps when two enrolled people look similar. **Typical:** `0.0` (off) or try **`0.05`–`0.15`**.
+
+Environment (when wired in app): `CNN_CONFIDENCE_THRESHOLD` in `.env` maps to the same idea as `--threshold`.
+
+#### Tuning the CNN confidence threshold
+
+- Start at **`0.5`**. If you see **wrong names** for strangers or near-twin classmates, **raise** to `0.55`–`0.65` and/or enable **`--margin 0.08`**.
+- If enrolled users are often **Unknown** despite being centered, **lower** slightly (e.g. `0.45`) or collect more varied training data.
+- **Blur / distance:** enable quality gates in live test: `--min-blur 40` (tune to your camera) and `--min-det 0.5` so bad crops are not classified.
+
+#### Better data collection for the next training round
+
+- **Variety:** multiple distances, slight left/right/up/down, different lighting (day/evening), glasses on/off if relevant.
+- **Quantity:** aim for **50+** crops per person; add more for anyone the model confuses.
+- **Quality:** avoid extreme blur and tiny faces; the collector already expects a single face and minimum size.
+- **Retrain** after adding folders, then run `prepare_cnn_dataset.py` and `train_cnn_recognizer.py` again.
+
+#### Training augmentations (next run)
+
+The trainer already uses flips, rotation, and color jitter. For harder robustness, you can extend `get_train_transform` in `scripts/train_cnn_recognizer.py` with small **affine** jitter, light **blur**, or occasional **grayscale** (see comment in that file).
+
+**Dataset structure:**
+```
+data/cnn_faces/
+  alice/          # From collect_cnn_faces.py
+  bob/
+  train/          # From prepare_cnn_dataset.py (80%)
+    alice/
+    bob/
+  val/            # 20%
+    alice/
+    bob/
+```
 
 ## Raspberry Pi Deployment
 

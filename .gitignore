@@ -71,6 +71,7 @@ tmp/
 temp/
 *.tmp
 *.temp
+metrics/
 
 # -----------------------------------------------------------------------------
 # Machine learning / AI artifacts

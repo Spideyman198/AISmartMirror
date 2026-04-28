@@ -6,6 +6,7 @@ Designed for clean startup/shutdown and dependency injection.
 """
 
 from typing import Optional
+from pathlib import Path
 
 import cv2
 
@@ -14,7 +15,7 @@ from utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
-WINDOW_NAME = "AISmartMirror - Face Detection"
+WINDOW_NAME = "AISmartMirror - Smart Mirror"
 
 
 class AppController:
@@ -30,6 +31,9 @@ class AppController:
         self._camera_manager = None
         self._face_detector = None
         self._face_recognizer = None
+        self._cnn_recognizer = None
+        self._cnn_pipeline = None
+        self._use_cnn_recognizer = False
         self._gesture_recognizer = None
         self._running = False
 
@@ -131,6 +135,7 @@ class AppController:
                 self._face_recognizer = FaceRecognizer(
                     threshold=self._settings.FACE_RECOGNITION_THRESHOLD,
                 )
+            self._configure_cnn_pipeline()
 
             self._gesture_recognizer = None  # Placeholder for now
 
@@ -141,7 +146,7 @@ class AppController:
             logger.exception("Initialization failed: %s", e)
             return False
 
-    def run(self) -> None:
+    def run(self, window_name: str = WINDOW_NAME) -> None:
         """Run the main application loop with live webcam display."""
         if not self._camera_manager or not self._face_detector:
             logger.error("Cannot run: initialize() must succeed first")
@@ -161,8 +166,9 @@ class AppController:
         try:
             from vision.display import draw_face_boxes
             from vision.recognition_smoother import RecognitionSmoother
+            from vision.cnn_live_pipeline import CNNLiveConfig, CNNLivePipeline
 
-            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
             frame_count = 0
             debug_saved = False
@@ -173,6 +179,22 @@ class AppController:
                 confirmation_count=max(1, self._settings.RECOGNITION_CONFIRMATION_COUNT),
             )
             show_debug = self._settings.DEBUG_RECOGNITION
+            if self._use_cnn_recognizer and self._cnn_recognizer:
+                self._cnn_pipeline = CNNLivePipeline(
+                    recognizer=self._cnn_recognizer,
+                    config=CNNLiveConfig(
+                        inference_interval=max(1, self._settings.FACE_RECOGNITION_INTERVAL_FRAMES),
+                        confirmation_count=max(1, self._settings.RECOGNITION_CONFIRMATION_COUNT),
+                        min_crop_side=48,
+                        min_blur_variance=0.0,
+                        min_detector_confidence=0.0,
+                        crop_margin_frac=0.0,
+                        show_reject_detail=False,
+                        stable_sort_faces=True,
+                    ),
+                )
+            last_fallback_labels: list[str] = []
+            last_fallback_face_count = -1
 
             while self._running:
                 frame = self._camera_manager.read()
@@ -214,6 +236,49 @@ class AppController:
                 # Detect faces every frame (fast, MediaPipe)
                 detections = self._face_detector.detect(frame)
 
+                if self._use_cnn_recognizer and self._cnn_pipeline:
+                    labels, dets_for_draw = self._cnn_pipeline.process_frame(
+                        frame,
+                        detections,
+                        threshold_for_debug=self._settings.CNN_CONFIDENCE_THRESHOLD,
+                    )
+                    draw_detections = dets_for_draw if dets_for_draw else detections
+                    run_fallback = (
+                        self._face_recognizer
+                        and (
+                            frame_count % recognition_interval == 0
+                            or len(draw_detections) != last_fallback_face_count
+                        )
+                    )
+                    if run_fallback:
+                        labels = self._apply_embedding_fallback(
+                            frame,
+                            draw_detections,
+                            labels,
+                        )
+                        last_fallback_labels = labels
+                        last_fallback_face_count = len(draw_detections)
+                    elif len(draw_detections) == len(last_fallback_labels):
+                        labels = last_fallback_labels
+                    display_frame = frame.copy()
+                    draw_face_boxes(
+                        display_frame,
+                        draw_detections,
+                        labels=labels if labels else None,
+                    )
+                    cv2.imshow(window_name, display_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
+                        logger.info("Quit key pressed")
+                        break
+                    try:
+                        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                            logger.info("Window closed")
+                            break
+                    except cv2.error:
+                        pass
+                    continue
+
                 # Run recognition every N frames or when face count changes
                 run_recognition = (
                     self._face_recognizer
@@ -248,7 +313,7 @@ class AppController:
                     labels=labels if labels else None,
                     debug_infos=debug_infos if show_debug else None,
                 )
-                cv2.imshow(WINDOW_NAME, display_frame)
+                cv2.imshow(window_name, display_frame)
 
                 # Check for quit: 'q' key or window closed
                 key = cv2.waitKey(1) & 0xFF
@@ -256,7 +321,7 @@ class AppController:
                     logger.info("Quit key pressed")
                     break
                 try:
-                    if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+                    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                         logger.info("Window closed")
                         break
                 except cv2.error:
@@ -284,5 +349,82 @@ class AppController:
         if self._face_recognizer:
             self._face_recognizer.close()
             self._face_recognizer = None
+        if self._cnn_recognizer:
+            self._cnn_recognizer.close()
+            self._cnn_recognizer = None
+            self._cnn_pipeline = None
 
         logger.info("Shutdown complete")
+
+    def _configure_cnn_pipeline(self) -> None:
+        """
+        Prefer CNN recognizer for runtime if a trained model exists.
+        Falls back to embedding recognizer automatically.
+        """
+        model_dir = (
+            Path(self._settings.CNN_MODEL_DIR)
+            if self._settings.CNN_MODEL_DIR
+            else Path("data") / "cnn_models"
+        )
+        model_path = model_dir / "cnn_face_model.pt"
+        if not model_path.exists():
+            self._use_cnn_recognizer = False
+            logger.warning(
+                "CNN model not found at %s; using embedding recognizer fallback.",
+                model_path,
+            )
+            return
+        try:
+            from vision.cnn_face_recognizer import CNNFaceRecognizer
+
+            self._cnn_recognizer = CNNFaceRecognizer(
+                model_dir=model_dir,
+                confidence_threshold=self._settings.CNN_CONFIDENCE_THRESHOLD,
+                min_class_margin=self._settings.CNN_MIN_CLASS_MARGIN,
+                max_softmax_entropy=self._settings.CNN_MAX_SOFTMAX_ENTROPY,
+            )
+            self._use_cnn_recognizer = True
+            logger.info("Using CNN recognizer for live mirror runtime (%s).", model_dir)
+            from vision.model_status import load_model_status
+
+            status = load_model_status(model_dir)
+            if status.get("cnn_outdated", False):
+                logger.warning(
+                    "CNN model marked outdated (%s). New users still recognized via embedding fallback.",
+                    status.get("outdated_reason", "unspecified"),
+                )
+        except Exception as exc:
+            logger.exception(
+                "Failed to initialize CNN recognizer (%s). Using embedding fallback.",
+                exc,
+            )
+            self._use_cnn_recognizer = False
+
+    def _apply_embedding_fallback(
+        self,
+        frame,
+        detections: list[dict],
+        labels: list[str],
+    ) -> list[str]:
+        """
+        CNN is primary. For unknown CNN results, try embedding recognizer so newly
+        enrolled users are recognized instantly without CNN retraining.
+        """
+        if not labels or not self._face_recognizer:
+            return labels
+        if len(labels) != len(detections):
+            return labels
+
+        out = list(labels)
+        for i, label in enumerate(labels):
+            if not label.startswith("Unknown"):
+                continue
+            x, y, w, h = detections[i]["bbox"]
+            crop = frame[y : y + h, x : x + w]
+            if crop is None or crop.size == 0:
+                continue
+            result = self._face_recognizer.recognize(crop)
+            if result.is_known and result.name:
+                sim = result.similarity
+                out[i] = f"{result.name} ({sim:.2f})"
+        return out

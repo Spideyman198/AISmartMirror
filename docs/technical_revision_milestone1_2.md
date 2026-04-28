@@ -34,6 +34,16 @@ A structured revision for capstone discussion, viva, or technical presentation. 
 | `RECOGNITION_CONFIRMATION_COUNT` | 2 | Consecutive matches required before confirming identity |
 | `DEBUG_RECOGNITION` | false | Show distance, threshold, state on screen |
 
+### CNN face recognizer (optional module)
+
+- **Added:** Second recognition pipeline using MobileNetV2 classifier (PyTorch).
+- **Files:** `vision/cnn_face_recognizer.py`, `vision/cnn_face_model.py`, `vision/cnn_face_dataset.py`, `scripts/collect_cnn_faces.py`, `scripts/prepare_cnn_dataset.py`, `scripts/train_cnn_recognizer.py`, `scripts/evaluate_cnn_recognizer.py`
+- **Model:** MobileNetV2 pretrained on ImageNet, custom classifier head (num_classes = num users).
+- **Input:** 224×224 RGB face crop. **Output:** Class label (user_id) + confidence.
+- **Differs from baseline:** Baseline uses embeddings + distance; CNN uses direct classification. CNN is trained on your data; baseline uses pretrained dlib only.
+- **Config:** `CNN_MODEL_DIR`, `CNN_CONFIDENCE_THRESHOLD`, `USE_CNN_RECOGNIZER`
+- **Deps:** `requirements-cnn.txt` (torch, torchvision)
+
 ---
 
 ## 1. Milestone 1 Summary
